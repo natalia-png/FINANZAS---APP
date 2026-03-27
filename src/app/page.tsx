@@ -17,6 +17,10 @@ interface Summary {
   sharedExpenses: number
   natDebtTotal: number
   alejoDebtTotal: number
+  natSavings: number
+  alejoSavings: number
+  natSavingsGoal: number
+  alejoSavingsGoal: number
 }
 
 export default function Dashboard() {
@@ -26,7 +30,8 @@ export default function Dashboard() {
   const [summary, setSummary] = useState<Summary>({
     natIncome: 0, natExpenses: 0,
     alejoIncome: 0, alejoExpenses: 0,
-    sharedExpenses: 0, natDebtTotal: 0, alejoDebtTotal: 0
+    sharedExpenses: 0, natDebtTotal: 0, alejoDebtTotal: 0,
+    natSavings: 0, alejoSavings: 0, natSavingsGoal: 0, alejoSavingsGoal: 0
   })
   const [loading, setLoading] = useState(true)
 
@@ -38,7 +43,7 @@ export default function Dashboard() {
     setLoading(true)
     const supabase = createClient()
 
-    const [natIncomeRes, natExpRes, alejoIncomeRes, alejoExpRes, sharedRes, natDebtRes, alejoDebtRes] =
+    const [natIncomeRes, natExpRes, alejoIncomeRes, alejoExpRes, sharedRes, natDebtRes, alejoDebtRes, natSavingsRes, alejoSavingsRes, natGoalRes, alejoGoalRes] =
       await Promise.all([
         supabase.from('incomes').select('amount').eq('persona', 'nat').eq('month', month).eq('year', year),
         supabase.from('expenses').select('amount').eq('persona', 'nat').eq('month', month).eq('year', year),
@@ -47,12 +52,18 @@ export default function Dashboard() {
         supabase.from('shared_expenses').select('amount').eq('month', month).eq('year', year),
         supabase.from('debts').select('amount, amount_paid').eq('persona', 'nat').neq('status', 'paid'),
         supabase.from('debts').select('amount, amount_paid').eq('persona', 'alejo').neq('status', 'paid'),
+        supabase.from('savings').select('amount, type').eq('persona', 'nat'),
+        supabase.from('savings').select('amount, type').eq('persona', 'alejo'),
+        supabase.from('saving_goals').select('target_amount').eq('persona', 'nat').maybeSingle(),
+        supabase.from('saving_goals').select('target_amount').eq('persona', 'alejo').maybeSingle(),
       ])
 
     const sum = (rows: { amount: number }[] | null) =>
       (rows ?? []).reduce((acc, r) => acc + r.amount, 0)
     const debtSum = (rows: { amount: number; amount_paid: number }[] | null) =>
       (rows ?? []).reduce((acc, r) => acc + (r.amount - r.amount_paid), 0)
+    const savingsSum = (rows: { amount: number; type: 'deposit' | 'withdrawal' }[] | null) =>
+      (rows ?? []).reduce((acc, r) => acc + (r.type === 'deposit' ? r.amount : -r.amount), 0)
 
     setSummary({
       natIncome: sum(natIncomeRes.data),
@@ -62,6 +73,10 @@ export default function Dashboard() {
       sharedExpenses: sum(sharedRes.data),
       natDebtTotal: debtSum(natDebtRes.data),
       alejoDebtTotal: debtSum(alejoDebtRes.data),
+      natSavings: savingsSum(natSavingsRes.data),
+      alejoSavings: savingsSum(alejoSavingsRes.data),
+      natSavingsGoal: natGoalRes.data?.target_amount ?? 0,
+      alejoSavingsGoal: alejoGoalRes.data?.target_amount ?? 0,
     })
     setLoading(false)
   }
@@ -170,6 +185,30 @@ export default function Dashboard() {
               <p className="text-xs text-gray-400 flex items-center gap-1"><span>🚀</span> Alejo</p>
               <p className="text-lg font-bold text-amber-500 mt-1">
                 {loading ? '...' : formatCurrency(summary.alejoDebtTotal)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="glass-card p-4">
+          <h3 className="font-semibold text-gray-800 mb-3">Ahorro individual</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs text-gray-400">Nat</p>
+              <p className="text-lg font-bold text-pink-500 mt-1">
+                {loading ? '...' : formatCurrency(summary.natSavings)}
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                Meta: {summary.natSavingsGoal > 0 ? formatCurrency(summary.natSavingsGoal) : 'sin definir'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Alejo</p>
+              <p className="text-lg font-bold text-blue-500 mt-1">
+                {loading ? '...' : formatCurrency(summary.alejoSavings)}
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                Meta: {summary.alejoSavingsGoal > 0 ? formatCurrency(summary.alejoSavingsGoal) : 'sin definir'}
               </p>
             </div>
           </div>

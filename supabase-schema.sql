@@ -43,6 +43,27 @@ CREATE TABLE IF NOT EXISTS debts (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Meta de ahorro individual
+CREATE TABLE IF NOT EXISTS saving_goals (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  persona TEXT NOT NULL UNIQUE CHECK (persona IN ('nat', 'alejo')),
+  target_amount NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (target_amount >= 0),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Movimientos de ahorro individual
+CREATE TABLE IF NOT EXISTS savings (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  persona TEXT NOT NULL CHECK (persona IN ('nat', 'alejo')),
+  type TEXT NOT NULL CHECK (type IN ('deposit', 'withdrawal')),
+  amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
+  description TEXT NOT NULL,
+  date DATE NOT NULL,
+  month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
+  year INTEGER NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Viajes compartidos
 CREATE TABLE IF NOT EXISTS trips (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -73,6 +94,7 @@ CREATE TABLE IF NOT EXISTS shared_expenses (
 CREATE INDEX IF NOT EXISTS idx_incomes_persona_month ON incomes(persona, month, year);
 CREATE INDEX IF NOT EXISTS idx_expenses_persona_month ON expenses(persona, month, year);
 CREATE INDEX IF NOT EXISTS idx_debts_persona ON debts(persona);
+CREATE INDEX IF NOT EXISTS idx_savings_persona_month ON savings(persona, month, year);
 CREATE INDEX IF NOT EXISTS idx_shared_expenses_month ON shared_expenses(month, year);
 CREATE INDEX IF NOT EXISTS idx_shared_expenses_trip ON shared_expenses(trip_id);
 

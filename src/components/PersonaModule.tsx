@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency, getPersonaConfig, INCOME_CATEGORIES, EXPENSE_CATEGORIES, MONTHS } from '@/lib/types'
-import type { UserProfile, Income, Expense, Debt } from '@/lib/types'
+import { formatCurrency, getPersonaConfig, INCOME_CATEGORIES, EXPENSE_CATEGORIES, MONTHS, SAVING_MOVEMENT_TYPES } from '@/lib/types'
+import type { UserProfile, Income, Expense, Debt, SavingGoal, SavingMovement } from '@/lib/types'
 import MonthSelector from './MonthSelector'
 import Navigation from './Navigation'
 
@@ -11,7 +11,7 @@ interface PersonaModuleProps {
   persona: UserProfile
 }
 
-type Tab = 'resumen' | 'ingresos' | 'gastos' | 'deudas'
+type Tab = 'resumen' | 'ingresos' | 'gastos' | 'deudas' | 'ahorro'
 
 export default function PersonaModule({ persona }: PersonaModuleProps) {
   const config = getPersonaConfig(persona)
@@ -22,21 +22,28 @@ export default function PersonaModule({ persona }: PersonaModuleProps) {
   const [incomes, setIncomes] = useState<Income[]>([])
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [debts, setDebts] = useState<Debt[]>([])
+  const [savings, setSavings] = useState<SavingMovement[]>([])
+  const [savingGoal, setSavingGoal] = useState<SavingGoal | null>(null)
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingGoal, setEditingGoal] = useState(false)
   const supabase = createClient()
 
   const loadData = useCallback(async () => {
     setLoading(true)
-    const [incRes, expRes, debtRes] = await Promise.all([
+    const [incRes, expRes, debtRes, savingsRes, goalRes] = await Promise.all([
       supabase.from('incomes').select('*').eq('persona', persona).eq('month', month).eq('year', year).order('date', { ascending: false }),
       supabase.from('expenses').select('*').eq('persona', persona).eq('month', month).eq('year', year).order('date', { ascending: false }),
       supabase.from('debts').select('*').eq('persona', persona).order('created_at', { ascending: false }),
+      supabase.from('savings').select('*').eq('persona', persona).order('date', { ascending: false }),
+      supabase.from('saving_goals').select('*').eq('persona', persona).maybeSingle(),
     ])
     setIncomes(incRes.data ?? [])
     setExpenses(expRes.data ?? [])
     setDebts(debtRes.data ?? [])
+    setSavings(savingsRes.data ?? [])
+    setSavingGoal(goalRes.data ?? null)
     setLoading(false)
   }, [persona, month, year])
 
@@ -46,12 +53,16 @@ export default function PersonaModule({ persona }: PersonaModuleProps) {
   const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0)
   const balance = totalIncome - totalExpenses
   const totalDebt = debts.filter(d => d.status !== 'paid').reduce((s, d) => s + (d.amount - d.amount_paid), 0)
+  const totalSavings = savings.reduce((s, movement) => s + (movement.type === 'deposit' ? movement.amount : -movement.amount), 0)
+  const savingsGoalAmount = savingGoal?.target_amount ?? 0
+  const savingsProgress = savingsGoalAmount > 0 ? Math.min((totalSavings / savingsGoalAmount) * 100, 100) : 0
 
   const tabs: { id: Tab; label: string; emoji: string }[] = [
     { id: 'resumen', label: 'Resumen', emoji: '📊' },
     { id: 'ingresos', label: 'Ingresos', emoji: '💰' },
     { id: 'gastos', label: 'Gastos', emoji: '💸' },
     { id: 'deudas', label: 'Deudas', emoji: '⚠️' },
+    { id: 'ahorro', label: 'Ahorro', emoji: 'A' },
   ]
 
   async function deleteRecord(table: string, id: string) {
@@ -61,6 +72,16 @@ export default function PersonaModule({ persona }: PersonaModuleProps) {
 
   async function markDebtPaid(id: string) {
     await supabase.from('debts').update({ status: 'paid', amount_paid: debts.find(d => d.id === id)?.amount }).eq('id', id)
+    loadData()
+  }
+
+  async function saveGoal(targetAmount: number) {
+    await supabase.from('saving_goals').upsert({
+      persona,
+      target_amount: targetAmount,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'persona' })
+    setEditingGoal(false)
     loadData()
   }
 
@@ -96,7 +117,7 @@ export default function PersonaModule({ persona }: PersonaModuleProps) {
           {tabs.map((t) => (
             <button
               key={t.id}
-              onClick={() => { setTab(t.id); setShowForm(false); setEditingId(null) }}
+              onClick={() => { setTab(t.id); setShowForm(false); setEditingId(null); setEditingGoal(false) }}
               className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
                 tab === t.id ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500'
               }`}
@@ -127,6 +148,32 @@ export default function PersonaModule({ persona }: PersonaModuleProps) {
               <p className="text-xs text-gray-400 mb-1">⚠️ Deudas pendientes</p>
               <p className="text-2xl font-bold text-amber-500">{formatCurrency(totalDebt)}</p>
               <p className="text-xs text-gray-400 mt-1">{debts.filter(d => d.status !== 'paid').length} deudas activas</p>
+            </div>
+            <div className="glass-card p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs text-gray-400 mb-1">Ahorro acumulado</p>
+                  <p className={`text-2xl font-bold ${config.textColor}`}>{formatCurrency(totalSavings)}</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Meta {savingsGoalAmount > 0 ? formatCurrency(savingsGoalAmount) : 'sin definir'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => { setTab('ahorro'); setShowForm(false); setEditingId(null) }}
+                  className={`px-3 py-2 rounded-xl text-xs font-semibold ${config.bgColor} ${config.textColor}`}
+                >
+                  Ver ahorro
+                </button>
+              </div>
+              <div className="w-full bg-gray-100 rounded-full h-2 mt-3">
+                <div
+                  className="h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${savingsProgress}%`, backgroundColor: config.color }}
+                />
+              </div>
+              <p className="text-xs text-gray-400 mt-2">
+                {savingsGoalAmount > 0 ? `${Math.round(savingsProgress)}% de la meta` : 'Agrega una meta para medir tu progreso'}
+              </p>
             </div>
             {expenses.length > 0 && (
               <div className="glass-card p-4">
@@ -279,6 +326,56 @@ export default function PersonaModule({ persona }: PersonaModuleProps) {
                   {editingId === debt.id && (
                     <EditDebtForm
                       debt={debt}
+                      config={config}
+                      onSaved={() => { setEditingId(null); loadData() }}
+                      onCancel={() => setEditingId(null)}
+                    />
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {tab === 'ahorro' && (
+          <div className="space-y-3 animate-fade-in">
+            <SavingGoalCard
+              config={config}
+              totalSavings={totalSavings}
+              goalAmount={savingsGoalAmount}
+              progress={savingsProgress}
+              editingGoal={editingGoal}
+              onEditGoal={() => setEditingGoal(!editingGoal)}
+              onSaveGoal={saveGoal}
+            />
+            <button
+              onClick={() => { setShowForm(!showForm); setEditingId(null) }}
+              className={`w-full py-3 rounded-xl font-semibold text-white ${config.gradient} shadow-md`}
+            >
+              {showForm ? 'Cancelar' : '+ Agregar movimiento de ahorro'}
+            </button>
+            {showForm && (
+              <AddSavingsForm persona={persona} onSaved={() => { setShowForm(false); loadData() }} config={config} />
+            )}
+            {loading ? (
+              <div className="text-center py-8 text-gray-400">Cargando...</div>
+            ) : savings.length === 0 ? (
+              <div className="glass-card p-8 text-center">
+                <p className="text-3xl mb-2">A</p>
+                <p className="text-gray-500 text-sm">Sin movimientos de ahorro registrados</p>
+              </div>
+            ) : (
+              savings.map((movement) => (
+                <div key={movement.id}>
+                  <SavingMovementCard
+                    movement={movement}
+                    isEditing={editingId === movement.id}
+                    onEdit={() => setEditingId(editingId === movement.id ? null : movement.id)}
+                    onDelete={() => deleteRecord('savings', movement.id)}
+                  />
+                  {editingId === movement.id && (
+                    <EditSavingsForm
+                      movement={movement}
                       config={config}
                       onSaved={() => { setEditingId(null); loadData() }}
                       onCancel={() => setEditingId(null)}
@@ -511,6 +608,199 @@ function EditDebtForm({ debt, config, onSaved, onCancel }: EditDebtFormProps) {
   )
 }
 
+interface SavingGoalCardProps {
+  config: ReturnType<typeof getPersonaConfig>
+  totalSavings: number
+  goalAmount: number
+  progress: number
+  editingGoal: boolean
+  onEditGoal: () => void
+  onSaveGoal: (targetAmount: number) => Promise<void>
+}
+
+function SavingGoalCard({ config, totalSavings, goalAmount, progress, editingGoal, onEditGoal, onSaveGoal }: SavingGoalCardProps) {
+  const [targetAmount, setTargetAmount] = useState(goalAmount > 0 ? String(goalAmount) : '')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    setTargetAmount(goalAmount > 0 ? String(goalAmount) : '')
+  }, [goalAmount])
+
+  const remaining = Math.max(goalAmount - totalSavings, 0)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    await onSaveGoal(parseFloat(targetAmount) || 0)
+    setSaving(false)
+  }
+
+  return (
+    <div className="glass-card p-4">
+      <div className="flex justify-between items-start gap-3">
+        <div>
+          <p className="text-xs text-gray-400 mb-1">Ahorro acumulado</p>
+          <p className={`text-2xl font-bold ${config.textColor}`}>{formatCurrency(totalSavings)}</p>
+          <p className="text-xs text-gray-400 mt-1">
+            {goalAmount > 0 ? `Te faltan ${formatCurrency(remaining)} para la meta` : 'Todavia no has definido una meta'}
+          </p>
+        </div>
+        <button
+          onClick={onEditGoal}
+          className={`px-3 py-2 rounded-xl text-xs font-semibold ${config.bgColor} ${config.textColor}`}
+        >
+          {editingGoal ? 'Cerrar' : goalAmount > 0 ? 'Editar meta' : 'Crear meta'}
+        </button>
+      </div>
+
+      <div className="mt-4">
+        <div className="flex justify-between text-xs text-gray-500 mb-2">
+          <span>Meta {goalAmount > 0 ? formatCurrency(goalAmount) : 'sin definir'}</span>
+          <span>{Math.round(progress)}%</span>
+        </div>
+        <div className="w-full bg-gray-100 rounded-full h-2">
+          <div
+            className="h-2 rounded-full transition-all duration-300"
+            style={{ width: `${progress}%`, backgroundColor: config.color }}
+          />
+        </div>
+      </div>
+
+      {editingGoal && (
+        <form onSubmit={handleSubmit} className="mt-4 space-y-3 border-t border-gray-100 pt-4">
+          <input
+            type="number"
+            value={targetAmount}
+            onChange={(e) => setTargetAmount(e.target.value)}
+            min="0"
+            placeholder="Ej. 3000000"
+            className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={saving}
+            className={`w-full py-2 rounded-xl font-semibold text-white text-sm ${config.buttonClass} disabled:opacity-50`}
+          >
+            {saving ? 'Guardando...' : 'Guardar meta'}
+          </button>
+        </form>
+      )}
+    </div>
+  )
+}
+
+interface AddSavingsFormProps {
+  persona: UserProfile
+  onSaved: () => void
+  config: ReturnType<typeof getPersonaConfig>
+}
+
+function AddSavingsForm({ persona, onSaved, config }: AddSavingsFormProps) {
+  const [type, setType] = useState<'deposit' | 'withdrawal'>('deposit')
+  const [amount, setAmount] = useState('')
+  const [description, setDescription] = useState('')
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0])
+  const [saving, setSaving] = useState(false)
+  const supabase = createClient()
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!amount || !description) return
+
+    const movementDate = new Date(date + 'T00:00:00')
+    setSaving(true)
+    await supabase.from('savings').insert({
+      persona,
+      type,
+      amount: parseFloat(amount),
+      description,
+      date,
+      month: movementDate.getMonth() + 1,
+      year: movementDate.getFullYear(),
+    })
+    setSaving(false)
+    onSaved()
+  }
+
+  return (
+    <form onSubmit={handleSave} className="glass-card p-4 space-y-3 animate-fade-in">
+      <h3 className="font-semibold text-gray-800 text-sm">Nuevo movimiento de ahorro</h3>
+      <select value={type} onChange={(e) => setType(e.target.value as 'deposit' | 'withdrawal')}
+        className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none">
+        {SAVING_MOVEMENT_TYPES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+      <input type="number" placeholder="Monto" value={amount} onChange={(e) => setAmount(e.target.value)} required
+        className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none" />
+      <input type="text" placeholder="Descripcion" value={description} onChange={(e) => setDescription(e.target.value)} required
+        className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none" />
+      <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+        className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none" />
+      <button type="submit" disabled={saving}
+        className={`w-full py-2 rounded-xl font-semibold text-white text-sm ${config.buttonClass} disabled:opacity-50`}>
+        {saving ? 'Guardando...' : 'Guardar movimiento'}
+      </button>
+    </form>
+  )
+}
+
+interface EditSavingsFormProps {
+  movement: SavingMovement
+  config: ReturnType<typeof getPersonaConfig>
+  onSaved: () => void
+  onCancel: () => void
+}
+
+function EditSavingsForm({ movement, config, onSaved, onCancel }: EditSavingsFormProps) {
+  const [type, setType] = useState<'deposit' | 'withdrawal'>(movement.type)
+  const [amount, setAmount] = useState(String(movement.amount))
+  const [description, setDescription] = useState(movement.description)
+  const [date, setDate] = useState(movement.date)
+  const [saving, setSaving] = useState(false)
+  const supabase = createClient()
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const movementDate = new Date(date + 'T00:00:00')
+    setSaving(true)
+    await supabase.from('savings').update({
+      type,
+      amount: parseFloat(amount),
+      description,
+      date,
+      month: movementDate.getMonth() + 1,
+      year: movementDate.getFullYear(),
+    }).eq('id', movement.id)
+    setSaving(false)
+    onSaved()
+  }
+
+  return (
+    <form onSubmit={handleSave} className="glass-card p-4 space-y-3 animate-fade-in border-2 border-dashed border-gray-200 -mt-2 rounded-t-none">
+      <h3 className="font-semibold text-gray-700 text-sm">Editando movimiento</h3>
+      <select value={type} onChange={(e) => setType(e.target.value as 'deposit' | 'withdrawal')}
+        className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none">
+        {SAVING_MOVEMENT_TYPES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+      <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} required
+        className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none" />
+      <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} required
+        className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none" />
+      <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+        className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none" />
+      <div className="flex gap-2">
+        <button type="button" onClick={onCancel}
+          className="flex-1 py-2 rounded-xl text-sm font-medium bg-gray-100 text-gray-600">
+          Cancelar
+        </button>
+        <button type="submit" disabled={saving}
+          className={`flex-1 py-2 rounded-xl font-semibold text-white text-sm ${config.buttonClass} disabled:opacity-50`}>
+          {saving ? '...' : 'Guardar'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
 interface TransactionCardProps {
   id: string
   amount: number
@@ -600,6 +890,41 @@ function DebtCard({ debt, isEditing, onEdit, onDelete, onMarkPaid }: DebtCardPro
           Vence: {new Date(debt.due_date + 'T00:00:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })}
         </p>
       )}
+    </div>
+  )
+}
+
+interface SavingMovementCardProps {
+  movement: SavingMovement
+  isEditing: boolean
+  onEdit: () => void
+  onDelete: () => void
+}
+
+function SavingMovementCard({ movement, isEditing, onEdit, onDelete }: SavingMovementCardProps) {
+  const isDeposit = movement.type === 'deposit'
+
+  return (
+    <div className={`glass-card p-4 flex justify-between items-center animate-fade-in ${isEditing ? 'rounded-b-none border-b-0' : ''}`}>
+      <div>
+        <p className="text-sm font-medium text-gray-800">{movement.description}</p>
+        <p className="text-xs text-gray-400">
+          {isDeposit ? 'Aporte' : 'Retiro'} Â· {new Date(movement.date + 'T00:00:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })}
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        <p className={`text-sm font-bold ${isDeposit ? 'text-green-500' : 'text-amber-500'}`}>
+          {isDeposit ? '+' : '-'}{formatCurrency(movement.amount)}
+        </p>
+        <button onClick={onEdit}
+          className={`w-6 h-6 rounded-full flex items-center justify-center text-xs transition-all ${isEditing ? 'bg-blue-100 text-blue-500' : 'bg-gray-100 hover:bg-blue-100 text-gray-400 hover:text-blue-500'}`}>
+          âœï¸
+        </button>
+        <button onClick={onDelete}
+          className="w-6 h-6 rounded-full bg-gray-100 hover:bg-red-100 flex items-center justify-center text-xs text-gray-400 hover:text-red-400">
+          Ã—
+        </button>
+      </div>
     </div>
   )
 }

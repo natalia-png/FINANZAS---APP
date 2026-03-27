@@ -46,6 +46,25 @@ export interface Debt {
   created_at: string
 }
 
+export interface SavingGoal {
+  id: string
+  persona: UserProfile
+  target_amount: number
+  updated_at: string
+}
+
+export interface SavingMovement {
+  id: string
+  persona: UserProfile
+  type: 'deposit' | 'withdrawal'
+  amount: number
+  description: string
+  date: string
+  month: number
+  year: number
+  created_at: string
+}
+
 export interface SharedExpense {
   id: string
   amount: number
@@ -78,6 +97,11 @@ export const EXPENSE_CATEGORIES = [
   'Comida', 'Transporte', 'Entretenimiento', 'Ropa', 'Salud',
   'Educación', 'Hogar', 'Servicios', 'Suscripciones', 'Otro'
 ]
+
+export const SAVING_MOVEMENT_TYPES = [
+  { value: 'deposit', label: 'Aporte' },
+  { value: 'withdrawal', label: 'Retiro' },
+] as const
 
 export const SHARED_CATEGORIES = [
   'Restaurante', 'Viaje', 'Supermercado', 'Entretenimiento',
