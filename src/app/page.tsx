@@ -21,6 +21,8 @@ interface Summary {
   alejoSavings: number
   natSavingsGoal: number
   alejoSavingsGoal: number
+  sharedSavings: number
+  sharedSavingsGoal: number
 }
 
 export default function Dashboard() {
@@ -31,7 +33,8 @@ export default function Dashboard() {
     natIncome: 0, natExpenses: 0,
     alejoIncome: 0, alejoExpenses: 0,
     sharedExpenses: 0, natDebtTotal: 0, alejoDebtTotal: 0,
-    natSavings: 0, alejoSavings: 0, natSavingsGoal: 0, alejoSavingsGoal: 0
+    natSavings: 0, alejoSavings: 0, natSavingsGoal: 0, alejoSavingsGoal: 0,
+    sharedSavings: 0, sharedSavingsGoal: 0
   })
   const [loading, setLoading] = useState(true)
 
@@ -43,7 +46,7 @@ export default function Dashboard() {
     setLoading(true)
     const supabase = createClient()
 
-    const [natIncomeRes, natExpRes, alejoIncomeRes, alejoExpRes, sharedRes, natDebtRes, alejoDebtRes, natSavingsRes, alejoSavingsRes, natGoalRes, alejoGoalRes] =
+    const [natIncomeRes, natExpRes, alejoIncomeRes, alejoExpRes, sharedRes, natDebtRes, alejoDebtRes, natSavingsRes, alejoSavingsRes, natGoalRes, alejoGoalRes, sharedSavingsRes, sharedSavingsGoalRes] =
       await Promise.all([
         supabase.from('incomes').select('amount').eq('persona', 'nat').eq('month', month).eq('year', year),
         supabase.from('expenses').select('amount').eq('persona', 'nat').eq('month', month).eq('year', year),
@@ -56,6 +59,8 @@ export default function Dashboard() {
         supabase.from('savings').select('amount, type').eq('persona', 'alejo'),
         supabase.from('saving_goals').select('target_amount').eq('persona', 'nat').maybeSingle(),
         supabase.from('saving_goals').select('target_amount').eq('persona', 'alejo').maybeSingle(),
+        supabase.from('shared_savings').select('amount, type'),
+        supabase.from('shared_saving_goals').select('target_amount').limit(1).maybeSingle(),
       ])
 
     const sum = (rows: { amount: number }[] | null) =>
@@ -77,6 +82,8 @@ export default function Dashboard() {
       alejoSavings: savingsSum(alejoSavingsRes.data),
       natSavingsGoal: natGoalRes.data?.target_amount ?? 0,
       alejoSavingsGoal: alejoGoalRes.data?.target_amount ?? 0,
+      sharedSavings: savingsSum(sharedSavingsRes.data),
+      sharedSavingsGoal: sharedSavingsGoalRes.data?.target_amount ?? 0,
     })
     setLoading(false)
   }
@@ -213,6 +220,23 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+
+        <Link href="/compartido">
+          <div className="glass-card p-4 hover:shadow-md transition-all">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="font-semibold text-gray-800">Ahorro juntos</h3>
+                <p className="text-xs text-gray-400 mt-1">
+                  Meta: {summary.sharedSavingsGoal > 0 ? formatCurrency(summary.sharedSavingsGoal) : 'sin definir'}
+                </p>
+                <p className="text-2xl font-bold text-emerald-500 mt-2">
+                  {loading ? '...' : formatCurrency(summary.sharedSavings)}
+                </p>
+              </div>
+              <span className="text-gray-300 text-2xl">â€º</span>
+            </div>
+          </div>
+        </Link>
 
         {/* Compartido */}
         <Link href="/compartido">

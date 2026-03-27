@@ -4,12 +4,12 @@ export const dynamic = 'force-dynamic'
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency, SHARED_CATEGORIES, MONTHS } from '@/lib/types'
-import type { SharedExpense, Trip } from '@/lib/types'
+import { formatCurrency, SHARED_CATEGORIES, MONTHS, SAVING_MOVEMENT_TYPES } from '@/lib/types'
+import type { SharedExpense, Trip, SharedSavingGoal, SharedSavingMovement } from '@/lib/types'
 import MonthSelector from '@/components/MonthSelector'
 import Navigation from '@/components/Navigation'
 
-type Tab = 'gastos' | 'viajes'
+type Tab = 'gastos' | 'viajes' | 'ahorro'
 
 export default function CompartidoPage() {
   const now = new Date()
@@ -18,19 +18,27 @@ export default function CompartidoPage() {
   const [tab, setTab] = useState<Tab>('gastos')
   const [expenses, setExpenses] = useState<SharedExpense[]>([])
   const [trips, setTrips] = useState<Trip[]>([])
+  const [sharedSavings, setSharedSavings] = useState<SharedSavingMovement[]>([])
+  const [sharedSavingGoal, setSharedSavingGoal] = useState<SharedSavingGoal | null>(null)
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [showTripForm, setShowTripForm] = useState(false)
+  const [showSavingForm, setShowSavingForm] = useState(false)
+  const [editingSharedGoal, setEditingSharedGoal] = useState(false)
   const supabase = createClient()
 
   const loadData = useCallback(async () => {
     setLoading(true)
-    const [expRes, tripRes] = await Promise.all([
+    const [expRes, tripRes, sharedSavingsRes, sharedGoalRes] = await Promise.all([
       supabase.from('shared_expenses').select('*').eq('month', month).eq('year', year).order('date', { ascending: false }),
       supabase.from('trips').select('*').order('start_date', { ascending: false }),
+      supabase.from('shared_savings').select('*').order('date', { ascending: false }),
+      supabase.from('shared_saving_goals').select('*').limit(1).maybeSingle(),
     ])
     setExpenses(expRes.data ?? [])
     setTrips(tripRes.data ?? [])
+    setSharedSavings(sharedSavingsRes.data ?? [])
+    setSharedSavingGoal(sharedGoalRes.data ?? null)
     setLoading(false)
   }, [month, year])
 
@@ -39,6 +47,9 @@ export default function CompartidoPage() {
   const totalShared = expenses.reduce((s, e) => s + e.amount, 0)
   const natPaid = expenses.filter(e => e.paid_by === 'nat').reduce((s, e) => s + e.amount, 0)
   const alejoPaid = expenses.filter(e => e.paid_by === 'alejo').reduce((s, e) => s + e.amount, 0)
+  const totalSharedSavings = sharedSavings.reduce((s, movement) => s + (movement.type === 'deposit' ? movement.amount : -movement.amount), 0)
+  const sharedSavingsGoalAmount = sharedSavingGoal?.target_amount ?? 0
+  const sharedSavingsProgress = sharedSavingsGoalAmount > 0 ? Math.min((totalSharedSavings / sharedSavingsGoalAmount) * 100, 100) : 0
 
   // Cálculo de quién le debe a quién
   const diff = natPaid - alejoPaid
@@ -61,6 +72,27 @@ export default function CompartidoPage() {
     loadData()
   }
 
+  async function deleteSharedSaving(id: string) {
+    await supabase.from('shared_savings').delete().eq('id', id)
+    loadData()
+  }
+
+  async function saveSharedGoal(targetAmount: number) {
+    if (sharedSavingGoal?.id) {
+      await supabase.from('shared_saving_goals').update({
+        target_amount: targetAmount,
+        updated_at: new Date().toISOString(),
+      }).eq('id', sharedSavingGoal.id)
+    } else {
+      await supabase.from('shared_saving_goals').insert({
+        target_amount: targetAmount,
+        updated_at: new Date().toISOString(),
+      })
+    }
+    setEditingSharedGoal(false)
+    loadData()
+  }
+
   return (
     <div className="min-h-screen pb-24">
       {/* Header */}
@@ -77,6 +109,12 @@ export default function CompartidoPage() {
           <p className="text-white/70 text-xs uppercase tracking-wide">Total compartido {MONTHS[month - 1]}</p>
           <p className="text-3xl font-bold mt-1">{loading ? '...' : formatCurrency(totalShared)}</p>
           <p className="text-white/90 text-sm mt-2 font-medium">{balanceText}</p>
+          <button
+            onClick={() => { setTab('ahorro'); setShowForm(false); setShowTripForm(false); setShowSavingForm(false); setEditingSharedGoal(false) }}
+            className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${tab === 'ahorro' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500'}`}
+          >
+            {'\u{1F91D}'} Ahorro
+          </button>
         </div>
       </div>
 
@@ -106,13 +144,13 @@ export default function CompartidoPage() {
       <div className="px-4 mt-4">
         <div className="flex gap-1 bg-white/60 rounded-xl p-1 shadow-sm">
           <button
-            onClick={() => { setTab('gastos'); setShowForm(false) }}
+            onClick={() => { setTab('gastos'); setShowForm(false); setShowTripForm(false); setShowSavingForm(false); setEditingSharedGoal(false) }}
             className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${tab === 'gastos' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500'}`}
           >
             💸 Gastos
           </button>
           <button
-            onClick={() => { setTab('viajes'); setShowTripForm(false) }}
+            onClick={() => { setTab('viajes'); setShowForm(false); setShowTripForm(false); setShowSavingForm(false); setEditingSharedGoal(false) }}
             className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${tab === 'viajes' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500'}`}
           >
             ✈️ Viajes
@@ -188,6 +226,49 @@ export default function CompartidoPage() {
                   trip={trip}
                   expenses={expenses.filter(e => e.trip_id === trip.id)}
                   onDelete={() => deleteTrip(trip.id)}
+                />
+              ))
+            )}
+          </div>
+        )}
+
+        {tab === 'ahorro' && (
+          <div className="space-y-3 animate-fade-in">
+            <SharedSavingsGoalCard
+              totalSavings={totalSharedSavings}
+              goalAmount={sharedSavingsGoalAmount}
+              progress={sharedSavingsProgress}
+              editingGoal={editingSharedGoal}
+              onEditGoal={() => setEditingSharedGoal(!editingSharedGoal)}
+              onSaveGoal={saveSharedGoal}
+            />
+
+            <button
+              onClick={() => setShowSavingForm(!showSavingForm)}
+              className="w-full py-3 rounded-xl font-semibold text-white gradient-shared shadow-md"
+            >
+              {showSavingForm ? 'Cancelar' : '+ Agregar movimiento de ahorro conjunto'}
+            </button>
+
+            {showSavingForm && (
+              <AddSharedSavingForm
+                onSaved={() => { setShowSavingForm(false); loadData() }}
+              />
+            )}
+
+            {loading ? (
+              <div className="text-center py-8 text-gray-400">Cargando...</div>
+            ) : sharedSavings.length === 0 ? (
+              <div className="glass-card p-8 text-center">
+                <p className="text-3xl mb-2">{'\u{1F91D}'}</p>
+                <p className="text-gray-500 text-sm">Todavia no tienen ahorro conjunto registrado</p>
+              </div>
+            ) : (
+              sharedSavings.map((movement) => (
+                <SharedSavingCard
+                  key={movement.id}
+                  movement={movement}
+                  onDelete={() => deleteSharedSaving(movement.id)}
                 />
               ))
             )}
@@ -386,6 +467,205 @@ function AddTripForm({ onSaved }: { onSaved: () => void }) {
         {saving ? 'Guardando...' : 'Crear viaje'}
       </button>
     </form>
+  )
+}
+
+function SharedSavingsGoalCard({
+  totalSavings,
+  goalAmount,
+  progress,
+  editingGoal,
+  onEditGoal,
+  onSaveGoal,
+}: {
+  totalSavings: number
+  goalAmount: number
+  progress: number
+  editingGoal: boolean
+  onEditGoal: () => void
+  onSaveGoal: (targetAmount: number) => Promise<void>
+}) {
+  const [targetAmount, setTargetAmount] = useState(goalAmount > 0 ? String(goalAmount) : '')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    setTargetAmount(goalAmount > 0 ? String(goalAmount) : '')
+  }, [goalAmount])
+
+  const remaining = Math.max(goalAmount - totalSavings, 0)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    await onSaveGoal(parseFloat(targetAmount) || 0)
+    setSaving(false)
+  }
+
+  return (
+    <div className="glass-card p-4">
+      <div className="flex justify-between items-start gap-3">
+        <div>
+          <p className="text-xs text-gray-400 mb-1">Ahorro conjunto</p>
+          <p className="text-2xl font-bold text-emerald-500">{formatCurrency(totalSavings)}</p>
+          <p className="text-xs text-gray-400 mt-1">
+            {goalAmount > 0 ? `Les faltan ${formatCurrency(remaining)} para la meta` : 'Todavia no han definido una meta conjunta'}
+          </p>
+        </div>
+        <button
+          onClick={onEditGoal}
+          className="px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-50 text-emerald-600"
+        >
+          {editingGoal ? 'Cerrar' : goalAmount > 0 ? 'Editar meta' : 'Crear meta'}
+        </button>
+      </div>
+
+      <div className="mt-4">
+        <div className="flex justify-between text-xs text-gray-500 mb-2">
+          <span>Meta {goalAmount > 0 ? formatCurrency(goalAmount) : 'sin definir'}</span>
+          <span>{Math.round(progress)}%</span>
+        </div>
+        <div className="w-full bg-gray-100 rounded-full h-2">
+          <div className="h-2 rounded-full bg-emerald-400 transition-all" style={{ width: `${progress}%` }} />
+        </div>
+      </div>
+
+      {editingGoal && (
+        <form onSubmit={handleSubmit} className="mt-4 space-y-3 border-t border-gray-100 pt-4">
+          <input
+            type="number"
+            value={targetAmount}
+            onChange={(e) => setTargetAmount(e.target.value)}
+            min="0"
+            placeholder="Ej. 5000000"
+            className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={saving}
+            className="w-full py-2 rounded-xl font-semibold text-white text-sm gradient-shared disabled:opacity-50"
+          >
+            {saving ? 'Guardando...' : 'Guardar meta'}
+          </button>
+        </form>
+      )}
+    </div>
+  )
+}
+
+function AddSharedSavingForm({ onSaved }: { onSaved: () => void }) {
+  const [type, setType] = useState<'deposit' | 'withdrawal'>('deposit')
+  const [amount, setAmount] = useState('')
+  const [description, setDescription] = useState('')
+  const [contributedBy, setContributedBy] = useState<'nat' | 'alejo'>('nat')
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0])
+  const [saving, setSaving] = useState(false)
+  const supabase = createClient()
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const movementDate = new Date(date + 'T00:00:00')
+    setSaving(true)
+    await supabase.from('shared_savings').insert({
+      type,
+      amount: parseFloat(amount),
+      description,
+      contributed_by: contributedBy,
+      date,
+      month: movementDate.getMonth() + 1,
+      year: movementDate.getFullYear(),
+    })
+    setSaving(false)
+    onSaved()
+  }
+
+  return (
+    <form onSubmit={handleSave} className="glass-card p-4 space-y-3 animate-fade-in">
+      <h3 className="font-semibold text-gray-800 text-sm">{'\u{1F91D}'} Nuevo movimiento conjunto</h3>
+      <select
+        value={type}
+        onChange={(e) => setType(e.target.value as 'deposit' | 'withdrawal')}
+        className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none"
+      >
+        {SAVING_MOVEMENT_TYPES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+      <input
+        type="number"
+        placeholder="Monto"
+        value={amount}
+        onChange={(e) => setAmount(e.target.value)}
+        required
+        className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none"
+      />
+      <input
+        type="text"
+        placeholder="Descripcion"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        required
+        className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none"
+      />
+      <div>
+        <label className="text-xs text-gray-500 block mb-1">Quien hizo el movimiento</label>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setContributedBy('nat')}
+            className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all ${contributedBy === 'nat' ? 'gradient-nat text-white shadow-md' : 'bg-gray-100 text-gray-600'}`}
+          >
+            Nat
+          </button>
+          <button
+            type="button"
+            onClick={() => setContributedBy('alejo')}
+            className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all ${contributedBy === 'alejo' ? 'gradient-alejo text-white shadow-md' : 'bg-gray-100 text-gray-600'}`}
+          >
+            Alejo
+          </button>
+        </div>
+      </div>
+      <input
+        type="date"
+        value={date}
+        onChange={(e) => setDate(e.target.value)}
+        className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none"
+      />
+      <button
+        type="submit"
+        disabled={saving}
+        className="w-full py-2 rounded-xl font-semibold text-white text-sm gradient-shared disabled:opacity-50"
+      >
+        {saving ? 'Guardando...' : 'Guardar movimiento'}
+      </button>
+    </form>
+  )
+}
+
+function SharedSavingCard({ movement, onDelete }: { movement: SharedSavingMovement; onDelete: () => void }) {
+  const isDeposit = movement.type === 'deposit'
+
+  return (
+    <div className="glass-card p-4 flex justify-between items-center animate-fade-in">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center text-lg">{'\u{1F91D}'}</div>
+        <div>
+          <p className="text-sm font-medium text-gray-800">{movement.description}</p>
+          <p className="text-xs text-gray-400">
+            {isDeposit ? 'Aporte' : 'Retiro'} · {movement.contributed_by === 'nat' ? 'Nat' : 'Alejo'}
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <p className={`text-sm font-bold ${isDeposit ? 'text-emerald-600' : 'text-amber-500'}`}>
+          {isDeposit ? '+' : '-'}{formatCurrency(movement.amount)}
+        </p>
+        <button
+          onClick={onDelete}
+          className="w-6 h-6 rounded-full bg-gray-100 hover:bg-red-100 flex items-center justify-center text-xs text-gray-400 hover:text-red-400 transition-all"
+        >
+          {'\u2715'}
+        </button>
+      </div>
+    </div>
   )
 }
 

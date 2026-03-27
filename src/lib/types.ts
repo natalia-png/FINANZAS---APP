@@ -65,6 +65,24 @@ export interface SavingMovement {
   created_at: string
 }
 
+export interface SharedSavingGoal {
+  id: string
+  target_amount: number
+  updated_at: string
+}
+
+export interface SharedSavingMovement {
+  id: string
+  type: 'deposit' | 'withdrawal'
+  amount: number
+  description: string
+  contributed_by: UserProfile
+  date: string
+  month: number
+  year: number
+  created_at: string
+}
+
 export interface SharedExpense {
   id: string
   amount: number
