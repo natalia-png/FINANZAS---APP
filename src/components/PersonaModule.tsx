@@ -62,7 +62,7 @@ export default function PersonaModule({ persona }: PersonaModuleProps) {
     { id: 'ingresos', label: 'Ingresos', emoji: '💰' },
     { id: 'gastos', label: 'Gastos', emoji: '💸' },
     { id: 'deudas', label: 'Deudas', emoji: '⚠️' },
-    { id: 'ahorro', label: 'Ahorro', emoji: 'A' },
+    { id: 'ahorro', label: 'Ahorro', emoji: '\u{1F3E6}' },
   ]
 
   async function deleteRecord(table: string, id: string) {
@@ -361,7 +361,7 @@ export default function PersonaModule({ persona }: PersonaModuleProps) {
               <div className="text-center py-8 text-gray-400">Cargando...</div>
             ) : savings.length === 0 ? (
               <div className="glass-card p-8 text-center">
-                <p className="text-3xl mb-2">A</p>
+                <p className="text-3xl mb-2">{'\u{1F3E6}'}</p>
                 <p className="text-gray-500 text-sm">Sin movimientos de ahorro registrados</p>
               </div>
             ) : (
@@ -918,11 +918,11 @@ function SavingMovementCard({ movement, isEditing, onEdit, onDelete }: SavingMov
         </p>
         <button onClick={onEdit}
           className={`w-6 h-6 rounded-full flex items-center justify-center text-xs transition-all ${isEditing ? 'bg-blue-100 text-blue-500' : 'bg-gray-100 hover:bg-blue-100 text-gray-400 hover:text-blue-500'}`}>
-          âœï¸
+          {'\u270F\uFE0F'}
         </button>
         <button onClick={onDelete}
           className="w-6 h-6 rounded-full bg-gray-100 hover:bg-red-100 flex items-center justify-center text-xs text-gray-400 hover:text-red-400">
-          Ã—
+          {'\u2715'}
         </button>
       </div>
     </div>
